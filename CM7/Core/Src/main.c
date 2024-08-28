@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -72,6 +73,17 @@ const osMessageQueueAttr_t UartRxQueue_attributes = {
 };
 /* USER CODE BEGIN PV */
 
+// RX buffer for ISR
+#define ISR_RX_BUFFER_SIZE 1U
+static uint8_t uartIrqRxBuffer[ISR_RX_BUFFER_SIZE];
+
+// Buffer for accumulating bytes in the thread
+#define UART_PROCESS_BUFFER_SIZE 32U
+static uint8_t uartProcessBuffer[UART_PROCESS_BUFFER_SIZE];
+static uint16_t uartProcessBufferIndex = 0;
+
+static const uint32_t UART_PROCESS_TIMEOUT = 1000;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -82,6 +94,8 @@ void StartDefaultTask(void *argument);
 void SerialProcessTask(void *argument);
 
 /* USER CODE BEGIN PFP */
+
+static void ProcessBuffer(uint8_t* buffer, uint16_t size);
 
 /* USER CODE END PFP */
 
@@ -383,6 +397,34 @@ PUTCHAR_PROTOTYPE
   return ch;
 }
 
+/**
+  * @brief  Rx Transfer completed callback.
+  * @param  huart UART handle.
+  * @retval None
+ */
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->Instance == USART3)
+  {
+    // Put the received byte into the queue
+    osMessageQueuePut(UartRxQueueHandle, uartIrqRxBuffer, 0, 0);
+
+    // Restart the interrupt to receive the next byte
+    HAL_UART_Receive_IT(huart, uartIrqRxBuffer, ISR_RX_BUFFER_SIZE);
+  }
+}
+
+static void ProcessBuffer(uint8_t *buffer, uint16_t size)
+{
+  // For now, we'll just print the buffer content
+  printf("Received %d bytes: ", size);
+  for (int i = 0; i < size; i++)
+  {
+    printf("%02X ", buffer[i]);
+  }
+  printf("\n");
+}
+
 
 /* USER CODE END 4 */
 
@@ -414,10 +456,39 @@ void StartDefaultTask(void *argument)
 void SerialProcessTask(void *argument)
 {
   /* USER CODE BEGIN SerialProcessTask */
+
+  // Start UART reception in interrupt mode
+  HAL_UART_Receive_IT(&huart3, uartIrqRxBuffer, ISR_RX_BUFFER_SIZE);
+
+  uint8_t receivedByte;
+  uint32_t lastReceiveTime = osKernelGetTickCount();
+
   /* Infinite loop */
-  for(;;)
+  for (;;)
   {
-    osDelay(1);
+    // Wait for a byte to be received
+    if (osMessageQueueGet(UartRxQueueHandle, &receivedByte, NULL, UART_PROCESS_TIMEOUT) == osOK)
+    {
+      uartProcessBuffer[uartProcessBufferIndex++] = receivedByte;
+      lastReceiveTime = osKernelGetTickCount();
+
+      if (uartProcessBufferIndex >= UART_PROCESS_BUFFER_SIZE)
+      {
+        ProcessBuffer(uartProcessBuffer, uartProcessBufferIndex);
+        uartProcessBufferIndex = 0;
+        memset(uartProcessBuffer, 0, UART_PROCESS_BUFFER_SIZE);
+      }
+    }
+    else
+    {
+      // Timeout occurred, check if we have partial data
+      if (uartProcessBufferIndex > 0 && (osKernelGetTickCount() - lastReceiveTime) >= UART_PROCESS_TIMEOUT)
+      {
+        ProcessBuffer(uartProcessBuffer, uartProcessBufferIndex);
+        uartProcessBufferIndex = 0;
+        memset(uartProcessBuffer, 0, UART_PROCESS_BUFFER_SIZE);
+      }
+    }
   }
   /* USER CODE END SerialProcessTask */
 }
