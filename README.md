@@ -4,7 +4,6 @@
 
 - Hardware
   - NUCLEO-H755ZI-Q (STM32H755ZI Development board): [Click!](https://www.st.com/en/evaluation-tools/nucleo-h755zi-q.html)
-  ![NUCLEO-H755ZI-Q](/docs/assets/nucleo-h755zi-q-bg.jpeg)
 
 - Software
   - IDE
@@ -18,8 +17,6 @@
 ## Steps
 
 ## Demonstration
-
-![demo](/docs//assets/demo.png)
 
 ## Reference
 
